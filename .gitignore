@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Backend local artifacts
+backend/.venv/
+backend/logpulse.db
+
+# Environment files
+.env
+.env.local
+.env.development
+.env.test
+
+# Build outputs
+frontend/dist/
