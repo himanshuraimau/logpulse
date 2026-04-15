@@ -4,10 +4,12 @@ import { Link } from "react-router-dom"
 import type { LogEvent } from "@/api/logs"
 import { useBatchStatus } from "@/hooks/use-batch-status"
 import { useGenerateLogs } from "@/hooks/use-generate-logs"
+import { useLogSearch } from "@/hooks/use-log-search"
 import { useConsumeStream } from "@/hooks/use-consume-stream"
 import { useLiveLogSocket } from "@/hooks/use-live-log-socket"
 import { useRecentLogs } from "@/hooks/use-recent-logs"
 import { useStreamStatus } from "@/hooks/use-stream-status"
+import { LogSearchForm } from "@/components/log-search-form"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -52,16 +54,19 @@ function mergeLogEvents(liveEvents: LogEvent[], persistedEvents: LogEvent[]): Lo
 
 export function LiveLogsPage() {
   const [scenario, setScenario] = useState<(typeof scenarios)[number]>("mixed")
+  const [searchedLogs, setSearchedLogs] = useState<LogEvent[] | null>(null)
   const streamStatus = useStreamStatus()
   const recentLogs = useRecentLogs(40)
   const batchStatus = useBatchStatus()
   const generateLogs = useGenerateLogs()
+  const logSearch = useLogSearch()
   const consumeStream = useConsumeStream()
   const liveSocket = useLiveLogSocket()
   const mergedLogs = useMemo(
     () => mergeLogEvents(liveSocket.events, recentLogs.data?.items ?? []),
     [liveSocket.events, recentLogs.data?.items]
   )
+  const displayedLogs = searchedLogs ?? mergedLogs
 
   const dbStatusVariant = useMemo(() => {
     if (!streamStatus.data?.database.ok) {
@@ -133,6 +138,16 @@ export function LiveLogsPage() {
               skipped {consumeStream.data.skipped}.
             </p>
           ) : null}
+          <div className="mt-3">
+            <LogSearchForm
+              onSearch={async (params) => {
+                const response = await logSearch.mutateAsync(params)
+                setSearchedLogs(response.items)
+              }}
+              onClear={() => setSearchedLogs(null)}
+              isPending={logSearch.isPending}
+            />
+          </div>
         </CardContent>
       </Card>
 
@@ -182,6 +197,9 @@ export function LiveLogsPage() {
             <span className="text-muted-foreground text-xs">
               Current anomaly count: {liveSocket.metrics?.anomalies ?? 0}
             </span>
+            {searchedLogs ? (
+              <Badge variant="warning">Search results {displayedLogs.length}</Badge>
+            ) : null}
           </div>
           <div className="border-border bg-background/70 max-h-110 overflow-auto border">
             <table className="w-full text-left text-xs">
@@ -196,7 +214,7 @@ export function LiveLogsPage() {
                 </tr>
               </thead>
               <tbody>
-                {mergedLogs.map((event) => (
+                {displayedLogs.map((event) => (
                   <tr key={event.event_id} className="border-border border-t">
                     <td className="px-2 py-1.5">{new Date(event.timestamp).toLocaleTimeString()}</td>
                     <td className="px-2 py-1.5">{event.service}</td>

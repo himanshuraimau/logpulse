@@ -56,6 +56,14 @@ export type LogEvent = {
   }
   tags?: string[]
   is_anomaly?: boolean
+  anomaly_score?: number
+  rule_matches?: string[]
+  detection?: {
+    model_anomaly?: boolean
+    model_score?: number
+    model_detail?: string
+    rule_score?: number
+  }
 }
 
 export type RecentLogsResponse = {
@@ -72,6 +80,25 @@ export type RecentAnomaliesResponse = {
   count: number
   last_sequence: number
   items: LogEvent[]
+}
+
+export type SearchLogsParams = {
+  q?: string
+  service?: string
+  level?: string
+  sinceMinutes?: number
+  limit?: number
+}
+
+export type SearchLogsResponse = {
+  count: number
+  items: LogEvent[]
+}
+
+export type AnomalyDetailResponse = {
+  event: LogEvent
+  context: LogEvent[]
+  context_count: number
 }
 
 export type GenerateLogsPayload = {
@@ -125,6 +152,12 @@ export type BatchStatusResponse = {
   configured_use_pyspark?: boolean
 }
 
+export type BatchMetricsResponse = {
+  count: number
+  latest: BatchStatusResponse | null
+  items: BatchStatusResponse[]
+}
+
 export function getHealth() {
   return apiRequest<HealthResponse>("/health")
 }
@@ -154,6 +187,31 @@ export function getRecentAnomalies(limit: number, lastSequence: number) {
   return apiRequest<RecentAnomaliesResponse>(`/anomalies/recent?${searchParams.toString()}`)
 }
 
+export function searchLogs(params: SearchLogsParams) {
+  const searchParams = new URLSearchParams()
+  if (params.q) {
+    searchParams.set("q", params.q)
+  }
+  if (params.service) {
+    searchParams.set("service", params.service)
+  }
+  if (params.level) {
+    searchParams.set("level", params.level)
+  }
+  if (params.sinceMinutes !== undefined) {
+    searchParams.set("since_minutes", String(params.sinceMinutes))
+  }
+  searchParams.set("limit", String(params.limit ?? 120))
+
+  return apiRequest<SearchLogsResponse>(`/logs/search?${searchParams.toString()}`)
+}
+
+export function getAnomalyDetail(eventId: string, contextLimit = 20) {
+  return apiRequest<AnomalyDetailResponse>(
+    `/anomalies/${encodeURIComponent(eventId)}?context_limit=${contextLimit}`
+  )
+}
+
 export function getLiveMetrics(windowSize = 200) {
   return apiRequest<LiveMetrics>(`/metrics/live?window_size=${windowSize}`)
 }
@@ -174,6 +232,10 @@ export function consumeStream(maxMessages: number) {
 
 export function getBatchStatus() {
   return apiRequest<BatchStatusResponse>("/batch/status")
+}
+
+export function getBatchMetrics(limit = 20) {
+  return apiRequest<BatchMetricsResponse>(`/metrics/batch?limit=${limit}`)
 }
 
 export function runBatchJob() {

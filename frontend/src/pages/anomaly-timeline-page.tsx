@@ -1,8 +1,9 @@
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 
 import type { LogEvent } from "@/api/logs"
 import { useAnomalySocket } from "@/hooks/use-anomaly-socket"
 import { useRecentAnomalies } from "@/hooks/use-recent-anomalies"
+import { AnomalyDetailModal } from "@/components/anomaly-detail-modal"
 import { Badge } from "@/components/ui/badge"
 import {
   Card,
@@ -36,6 +37,7 @@ function mergeAnomalyEvents(liveEvents: LogEvent[], persistedEvents: LogEvent[])
 }
 
 export function AnomalyTimelinePage() {
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
   const anomalySocket = useAnomalySocket(180)
   const recentAnomalies = useRecentAnomalies(120, 240)
 
@@ -63,6 +65,7 @@ export function AnomalyTimelinePage() {
             </Badge>
             <Badge variant="outline">Live seq {anomalySocket.lastSequence}</Badge>
             <Badge variant="outline">Visible {mergedAnomalies.length}</Badge>
+            {selectedEventId ? <Badge variant="warning">Selected {selectedEventId}</Badge> : null}
           </div>
           <p className="text-muted-foreground text-xs">
             Synthetic anomaly flags and stream-marked anomaly events are shown here for operator
@@ -100,7 +103,11 @@ export function AnomalyTimelinePage() {
                   </tr>
                 ) : (
                   mergedAnomalies.map((event) => (
-                    <tr key={event.event_id} className="border-border border-t">
+                    <tr
+                      key={event.event_id}
+                      className="border-border cursor-pointer border-t hover:bg-muted/40"
+                      onClick={() => setSelectedEventId(event.event_id)}
+                    >
                       <td className="px-2 py-1.5">{new Date(event.timestamp).toLocaleTimeString()}</td>
                       <td className="px-2 py-1.5">{event.service}</td>
                       <td className="px-2 py-1.5">{event.log_level}</td>
@@ -115,6 +122,8 @@ export function AnomalyTimelinePage() {
           </div>
         </CardContent>
       </Card>
+
+      <AnomalyDetailModal eventId={selectedEventId} onClose={() => setSelectedEventId(null)} />
     </section>
   )
 }

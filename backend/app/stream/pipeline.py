@@ -4,9 +4,12 @@ from threading import Lock
 from typing import Any
 from uuid import uuid4
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.ml.detection import IsolationForestScorer
+from app.ml.rules import evaluate_rules
 from app.storage.db import check_db_connection
 from app.storage.models import RawLogEvent
 from app.stream.kafka_producer import KafkaPublisher
@@ -18,10 +21,37 @@ _event_stream: deque[dict[str, Any]] = deque(maxlen=max(settings.log_buffer_size
 _event_lock = Lock()
 _event_sequence = 0
 _kafka_publisher = KafkaPublisher()
+_anomaly_scorer = IsolationForestScorer(
+    warmup_events=settings.anomaly_model_warmup_events,
+    retrain_interval=settings.anomaly_model_retrain_interval,
+    contamination=settings.anomaly_model_contamination,
+    enabled=settings.anomaly_scoring_enabled,
+)
 
 
 def _parse_timestamp(timestamp_value: str) -> datetime:
     return datetime.fromisoformat(timestamp_value.replace("Z", "+00:00"))
+
+
+def enrich_event_with_detection(payload: dict[str, Any]) -> dict[str, Any]:
+    recent_events = get_recent_events_snapshot(limit=settings.rule_source_burst_window)
+    model_evaluation = _anomaly_scorer.score_event(payload)
+    rule_evaluation = evaluate_rules(payload=payload, recent_events=recent_events)
+
+    combined_score = max(model_evaluation.score, rule_evaluation.score)
+    is_anomaly = bool(model_evaluation.is_anomaly or rule_evaluation.is_anomaly)
+
+    enriched_payload = dict(payload)
+    enriched_payload["is_anomaly"] = is_anomaly
+    enriched_payload["anomaly_score"] = round(combined_score, 4)
+    enriched_payload["rule_matches"] = rule_evaluation.matches
+    enriched_payload["detection"] = {
+        "model_anomaly": model_evaluation.is_anomaly,
+        "model_score": model_evaluation.score,
+        "model_detail": model_evaluation.detail,
+        "rule_score": rule_evaluation.score,
+    }
+    return enriched_payload
 
 
 def payload_to_raw_log_event(payload: dict[str, Any]) -> RawLogEvent:
@@ -79,10 +109,12 @@ def generate_and_stream_logs(db: Session, scenario: str, count: int) -> dict[str
 
     try:
         for event in events:
-            db.add(payload_to_raw_log_event(event))
+            enriched_event = enrich_event_with_detection(event)
+
+            db.add(payload_to_raw_log_event(enriched_event))
             persisted += 1
 
-            published, error = _kafka_publisher.publish(event)
+            published, error = _kafka_publisher.publish(enriched_event)
             if published:
                 kafka_published += 1
             else:
@@ -90,7 +122,7 @@ def generate_and_stream_logs(db: Session, scenario: str, count: int) -> dict[str
                 if error and error not in errors:
                     errors.append(error)
 
-            register_event(event)
+            register_event(enriched_event)
 
         db.commit()
     except Exception:
@@ -178,6 +210,107 @@ def get_recent_anomalies(
         ]
 
     return fallback_events[:limit]
+
+
+def search_logs(
+    db: Session,
+    limit: int = 100,
+    query: str | None = None,
+    service: str | None = None,
+    level: str | None = None,
+    since_minutes: int | None = None,
+) -> list[dict[str, Any]]:
+    db_query = db.query(RawLogEvent)
+
+    if service:
+        db_query = db_query.filter(RawLogEvent.service == service)
+
+    if level:
+        db_query = db_query.filter(RawLogEvent.level == level.upper())
+
+    if since_minutes is not None:
+        threshold = datetime.now(UTC) - timedelta(minutes=since_minutes)
+        db_query = db_query.filter(RawLogEvent.timestamp >= threshold)
+
+    normalized_query = query.strip() if query else ""
+    if normalized_query:
+        pattern = f"%{normalized_query}%"
+        db_query = db_query.filter(
+            or_(
+                RawLogEvent.message.ilike(pattern),
+                RawLogEvent.service.ilike(pattern),
+                RawLogEvent.source_ip.ilike(pattern),
+            )
+        )
+
+    records = db_query.order_by(RawLogEvent.timestamp.desc()).limit(limit).all()
+    if records:
+        return [record.payload for record in records]
+
+    with _recent_lock:
+        fallback_records = list(_recent_events)
+
+    if service:
+        fallback_records = [item for item in fallback_records if item.get("service") == service]
+
+    if level:
+        level_upper = level.upper()
+        fallback_records = [
+            item for item in fallback_records if str(item.get("log_level", "")).upper() == level_upper
+        ]
+
+    if since_minutes is not None:
+        fallback_records = [
+            item for item in fallback_records if _within_time_window(item, since_minutes)
+        ]
+
+    if normalized_query:
+        lowered_query = normalized_query.lower()
+        fallback_records = [
+            item
+            for item in fallback_records
+            if lowered_query in str(item.get("message", "")).lower()
+            or lowered_query in str(item.get("service", "")).lower()
+            or lowered_query in str(item.get("network", {}).get("source_ip", "")).lower()
+        ]
+
+    return fallback_records[:limit]
+
+
+def get_anomaly_detail(
+    db: Session,
+    event_id: str,
+    context_limit: int = 20,
+) -> dict[str, Any] | None:
+    record = (
+        db.query(RawLogEvent)
+        .filter(
+            RawLogEvent.event_id == event_id,
+            RawLogEvent.is_anomaly.is_(True),
+        )
+        .first()
+    )
+    if not record:
+        return None
+
+    context_records = (
+        db.query(RawLogEvent)
+        .filter(RawLogEvent.service == record.service)
+        .order_by(RawLogEvent.timestamp.desc())
+        .limit(context_limit + 1)
+        .all()
+    )
+    context_items = [
+        item.payload
+        for item in context_records
+        if item.event_id != record.event_id
+    ][:context_limit]
+
+    return {
+        "event": record.payload,
+        "context": context_items,
+        "context_count": len(context_items),
+    }
 
 
 def get_anomaly_events_since(last_sequence: int = 0, limit: int = 200) -> list[dict[str, Any]]:

@@ -3,6 +3,7 @@ import time
 
 import uvicorn
 
+from app.agent.worker import run_agent_worker_forever
 from app.batch.scheduler import run_batch_loop, run_batch_once
 from app.stream.consumer import consume_from_kafka
 from app.storage.db import SessionLocal
@@ -38,7 +39,7 @@ def run_batch_mode(run_loop: bool = False, interval_seconds: int | None = None) 
 
 
 def run_agent_mode() -> None:
-    print("[agent] Phase 1 stub. RCA worker implementation comes next.")
+    run_agent_worker_forever()
 
 
 def main() -> None:

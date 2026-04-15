@@ -54,15 +54,12 @@ def build_log_event(scenario: str = "normal", source_ip: str | None = None) -> d
     if selected_scenario == "error_spike":
         status = random.choice([500, 502, 503, 504])
         level = "ERROR"
-        is_anomaly = True
     elif selected_scenario == "auth_failures":
         status = random.choice([401, 403])
         level = "WARN"
-        is_anomaly = True
     else:
         status = 200 if selected_scenario == "normal" else random.choice([200, 201, 202])
         level = "INFO"
-        is_anomaly = selected_scenario == "request_burst"
 
     latency_ms = random.uniform(30.0, 950.0)
     event_time = datetime.now(UTC)
@@ -99,7 +96,6 @@ def build_log_event(scenario: str = "normal", source_ip: str | None = None) -> d
             "success": selected_scenario != "auth_failures",
         },
         "tags": ["phase-1", selected_scenario],
-        "is_anomaly": is_anomaly,
     }
 
 

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.storage.models import RawLogEvent
-from app.stream.pipeline import payload_to_raw_log_event, register_event
+from app.stream.pipeline import enrich_event_with_detection, payload_to_raw_log_event, register_event
 
 
 def consume_from_kafka(db: Session, max_messages: int = 200) -> dict[str, Any]:
@@ -74,9 +74,11 @@ def consume_from_kafka(db: Session, max_messages: int = 200) -> dict[str, Any]:
                             skipped += 1
                             continue
 
-                    db.add(payload_to_raw_log_event(payload))
+                    enriched_payload = enrich_event_with_detection(payload)
+
+                    db.add(payload_to_raw_log_event(enriched_payload))
                     persisted += 1
-                    register_event(payload)
+                    register_event(enriched_payload)
 
         db.commit()
     except Exception as exc:  # pragma: no cover - defensive API surface

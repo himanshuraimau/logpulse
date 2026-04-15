@@ -9,6 +9,7 @@ export function useRunBatch() {
     mutationFn: runBatchJob,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["batch-status"] })
+      queryClient.invalidateQueries({ queryKey: ["batch-history"] })
     },
   })
 }

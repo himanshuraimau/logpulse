@@ -1,5 +1,6 @@
 import { useMemo } from "react"
 
+import { useBatchHistory } from "@/hooks/use-batch-history"
 import { useBatchStatus } from "@/hooks/use-batch-status"
 import { useRunBatch } from "@/hooks/use-run-batch"
 import { Badge } from "@/components/ui/badge"
@@ -14,10 +15,12 @@ import {
 
 export function BatchAnalyticsPage() {
   const batchStatus = useBatchStatus()
+  const batchHistory = useBatchHistory(12)
   const runBatch = useRunBatch()
+  const latestRun = batchHistory.data?.latest ?? batchStatus.data
   const serviceRows = useMemo(
-    () => batchStatus.data?.services ?? [],
-    [batchStatus.data?.services]
+    () => latestRun?.services ?? [],
+    [latestRun?.services]
   )
 
   return (
@@ -32,10 +35,10 @@ export function BatchAnalyticsPage() {
         <CardContent>
           <div className="mb-3 flex flex-wrap gap-2">
             <Badge variant={batchStatus.data?.status === "ok" ? "success" : "outline"}>
-              Status {batchStatus.data?.status ?? "idle"}
+              Status {latestRun?.status ?? "idle"}
             </Badge>
-            <Badge variant={batchStatus.data?.engine === "pyspark" ? "success" : "warning"}>
-              Engine {batchStatus.data?.engine ?? "none"}
+            <Badge variant={latestRun?.engine === "pyspark" ? "success" : "warning"}>
+              Engine {latestRun?.engine ?? "none"}
             </Badge>
             <Badge variant="outline">
               Interval {batchStatus.data?.configured_interval_seconds ?? 0}s
@@ -47,13 +50,13 @@ export function BatchAnalyticsPage() {
 
           <div className="mb-3 space-y-1.5 text-xs">
             <p>
-              Total events: <strong>{batchStatus.data?.total_events ?? 0}</strong>
+              Total events: <strong>{latestRun?.total_events ?? 0}</strong>
             </p>
             <p>
-              Services: <strong>{batchStatus.data?.service_count ?? 0}</strong>
+              Services: <strong>{latestRun?.service_count ?? 0}</strong>
             </p>
             <p>
-              Duration: <strong>{batchStatus.data?.duration_ms ?? 0} ms</strong>
+              Duration: <strong>{latestRun?.duration_ms ?? 0} ms</strong>
             </p>
           </div>
 
@@ -64,6 +67,42 @@ export function BatchAnalyticsPage() {
           <Button onClick={() => runBatch.mutate()} disabled={runBatch.isPending}>
             {runBatch.isPending ? "Running..." : "Run Batch Once"}
           </Button>
+
+          <div className="mt-3 border border-border bg-background/70">
+            <p className="border-b border-border px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+              Recent Batch Runs
+            </p>
+            <div className="max-h-48 overflow-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-muted sticky top-0 text-[10px] uppercase">
+                  <tr>
+                    <th className="px-2 py-1.5">Run</th>
+                    <th className="px-2 py-1.5">Engine</th>
+                    <th className="px-2 py-1.5">Status</th>
+                    <th className="px-2 py-1.5">Duration</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(batchHistory.data?.items ?? []).length === 0 ? (
+                    <tr>
+                      <td className="px-2 py-2 text-muted-foreground" colSpan={4}>
+                        No persisted runs yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    (batchHistory.data?.items ?? []).map((run, index) => (
+                      <tr key={run.run_id ?? `${run.started_at ?? "run"}-${index}`} className="border-t border-border">
+                        <td className="px-2 py-1.5">{run.run_id?.slice(0, 8) ?? "-"}</td>
+                        <td className="px-2 py-1.5">{run.engine}</td>
+                        <td className="px-2 py-1.5">{run.status}</td>
+                        <td className="px-2 py-1.5">{run.duration_ms ?? 0} ms</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -75,7 +114,7 @@ export function BatchAnalyticsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="border-border bg-background/70 max-h-[460px] overflow-auto border">
+          <div className="border-border bg-background/70 max-h-115 overflow-auto border">
             <table className="w-full text-left text-xs">
               <thead className="bg-muted sticky top-0 text-[10px] uppercase">
                 <tr>

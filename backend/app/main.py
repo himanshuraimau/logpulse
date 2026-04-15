@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.agent.worker import start_agent_worker, stop_agent_worker
 from app.api.router import api_router
 from app.core.config import settings
 from app.storage.db import init_db
@@ -12,7 +13,12 @@ from app.ws.routes import router as ws_router
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    yield
+    worker_started = start_agent_worker()
+    try:
+        yield
+    finally:
+        if worker_started:
+            stop_agent_worker()
 
 
 def create_app() -> FastAPI:

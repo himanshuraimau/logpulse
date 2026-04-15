@@ -4,17 +4,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
-from app.batch.scheduler import get_batch_status, run_batch_once
+from app.batch.scheduler import get_batch_history, get_batch_status, run_batch_once
 from app.storage.db import get_db
 from app.stream.consumer import consume_from_kafka
 from app.stream.log_generator import SCENARIOS
 from app.stream.pipeline import (
+    get_anomaly_detail,
     get_anomaly_events_since,
     generate_and_stream_logs,
     get_live_metrics,
     get_pipeline_status,
     get_recent_anomalies,
     get_recent_logs,
+    search_logs,
 )
 
 router = APIRouter()
@@ -62,6 +64,29 @@ def recent_logs(
     }
 
 
+@router.get("/logs/search")
+def logs_search(
+    q: str | None = Query(default=None, min_length=1, max_length=200),
+    service: str | None = Query(default=None, min_length=1, max_length=64),
+    level: str | None = Query(default=None, min_length=1, max_length=16),
+    since_minutes: int | None = Query(default=None, ge=1, le=10080),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    items = search_logs(
+        db=db,
+        limit=limit,
+        query=q,
+        service=service,
+        level=level,
+        since_minutes=since_minutes,
+    )
+    return {
+        "count": len(items),
+        "items": items,
+    }
+
+
 @router.get("/anomalies")
 def anomalies(
     limit: int = Query(default=100, ge=1, le=500),
@@ -95,6 +120,18 @@ def anomalies_recent(
     }
 
 
+@router.get("/anomalies/{event_id}")
+def anomaly_detail(
+    event_id: str,
+    context_limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    detail = get_anomaly_detail(db=db, event_id=event_id, context_limit=context_limit)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Anomaly not found")
+    return detail
+
+
 @router.get("/stream/status")
 def stream_status() -> dict[str, Any]:
     return get_pipeline_status()
@@ -105,6 +142,18 @@ def live_metrics(
     window_size: int = Query(default=200, ge=10, le=2000),
 ) -> dict[str, Any]:
     return get_live_metrics(window_size=window_size)
+
+
+@router.get("/metrics/batch")
+def batch_metrics(
+    limit: int = Query(default=20, ge=1, le=100),
+) -> dict[str, Any]:
+    items = get_batch_history(limit=limit)
+    return {
+        "count": len(items),
+        "latest": items[0] if items else None,
+        "items": items,
+    }
 
 
 @router.post("/stream/consume")
