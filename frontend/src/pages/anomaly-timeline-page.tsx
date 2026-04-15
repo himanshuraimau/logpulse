@@ -12,15 +12,15 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { getErrorMessage } from "@/lib/errors"
+import { formatEventTime, getLogEventKey } from "@/lib/log-event"
 
 function mergeAnomalyEvents(liveEvents: LogEvent[], persistedEvents: LogEvent[]): LogEvent[] {
   const dedupedEvents: LogEvent[] = []
   const seenKeys = new Set<string>()
 
   for (const event of [...liveEvents, ...persistedEvents]) {
-    const key =
-      event.event_id ||
-      [event.timestamp, event.service, event.message, event.network?.source_ip].join("-")
+    const key = getLogEventKey(event)
 
     if (seenKeys.has(key)) {
       continue
@@ -60,6 +60,9 @@ export function AnomalyTimelinePage() {
             <Badge variant={anomalySocket.state === "open" ? "success" : "warning"}>
               WS anomalies {anomalySocket.state}
             </Badge>
+            {anomalySocket.reconnectAttempts > 0 ? (
+              <Badge variant="warning">WS retries {anomalySocket.reconnectAttempts}</Badge>
+            ) : null}
             <Badge variant={recentAnomalies.data ? "success" : "warning"}>
               API {recentAnomalies.isFetching ? "refreshing" : "ready"}
             </Badge>
@@ -71,6 +74,11 @@ export function AnomalyTimelinePage() {
             Synthetic anomaly flags and stream-marked anomaly events are shown here for operator
             triage before RCA workflow execution.
           </p>
+          {recentAnomalies.isError ? (
+            <p className="text-xs text-red-700 dark:text-red-300">
+              Failed to load anomalies: {getErrorMessage(recentAnomalies.error)}
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -102,18 +110,22 @@ export function AnomalyTimelinePage() {
                     </td>
                   </tr>
                 ) : (
-                  mergedAnomalies.map((event) => (
+                  mergedAnomalies.map((event, index) => (
                     <tr
-                      key={event.event_id}
-                      className="border-border cursor-pointer border-t hover:bg-muted/40"
-                      onClick={() => setSelectedEventId(event.event_id)}
+                      key={`${getLogEventKey(event)}-${index}`}
+                      className="border-border border-t hover:bg-muted/40"
+                      onClick={() => {
+                        if (event.event_id) {
+                          setSelectedEventId(event.event_id)
+                        }
+                      }}
                     >
-                      <td className="px-2 py-1.5">{new Date(event.timestamp).toLocaleTimeString()}</td>
-                      <td className="px-2 py-1.5">{event.service}</td>
-                      <td className="px-2 py-1.5">{event.log_level}</td>
+                      <td className="px-2 py-1.5">{formatEventTime(event.timestamp)}</td>
+                      <td className="px-2 py-1.5">{event.service || "-"}</td>
+                      <td className="px-2 py-1.5">{event.log_level || "-"}</td>
                       <td className="px-2 py-1.5">{event.http?.status ?? "-"}</td>
                       <td className="px-2 py-1.5">{event.network?.source_ip ?? "-"}</td>
-                      <td className="px-2 py-1.5">{event.message}</td>
+                      <td className="px-2 py-1.5">{event.message || "-"}</td>
                     </tr>
                   ))
                 )}

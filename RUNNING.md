@@ -73,6 +73,12 @@ From repo root:
 cp .env.example backend/.env
 ```
 
+Important:
+
+- The backend expects its runtime `.env` at `backend/.env` (not repo root).
+- In Docker Compose, backend runtime path is `/app`, so this maps to `backend/.env` on host.
+- `CORS_ORIGINS` supports both comma-separated and JSON array formats.
+
 Then:
 
 ```bash
@@ -123,6 +129,12 @@ cd backend
 uv run python -m app.runner --mode batch --batch-loop
 ```
 
+Notes:
+
+- Batch aggregation tries PySpark when `BATCH_USE_PYSPARK=true`.
+- If Java is not available in the runtime, the job now falls back to the Python aggregator and returns a warning field in the response.
+- To avoid PySpark startup overhead locally, you can set `BATCH_USE_PYSPARK=false` in your environment.
+
 ## 5) RCA Agent Credentials
 
 Set keys in `backend/.env` for live RCA model execution:
@@ -133,6 +145,14 @@ OPENAI_API_KEY=your_openai_key
 ```
 
 Without keys, requests can still be queued, but live LLM analysis cannot complete.
+
+Validate agent env loading at runtime:
+
+```bash
+curl "http://localhost:8000/api/v1/agent/config"
+```
+
+This endpoint safely reports whether `GEMINI_API_KEY` and `OPENAI_API_KEY` are detected in `.env` and loaded into settings (without returning secret values).
 
 ## 6) Basic Smoke Flow
 
@@ -167,3 +187,6 @@ curl "http://localhost:8000/api/v1/agent/reports?limit=20"
   - Ensure API process is running.
   - Ensure `AGENT_WORKER_ENABLED=true` in `backend/.env`.
   - Ensure model keys are configured for live completion.
+- Batch run returns `500` or appears as CORS failure in browser:
+  - Check backend logs for Java/PySpark startup errors.
+  - Set `BATCH_USE_PYSPARK=false` for local runtime if Java is unavailable.

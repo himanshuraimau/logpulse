@@ -7,6 +7,7 @@ import { useGenerateLogs } from "@/hooks/use-generate-logs"
 import { useLogSearch } from "@/hooks/use-log-search"
 import { useConsumeStream } from "@/hooks/use-consume-stream"
 import { useLiveLogSocket } from "@/hooks/use-live-log-socket"
+import { useLogScenarios } from "@/hooks/use-log-scenarios"
 import { useRecentLogs } from "@/hooks/use-recent-logs"
 import { useStreamStatus } from "@/hooks/use-stream-status"
 import { LogSearchForm } from "@/components/log-search-form"
@@ -19,8 +20,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { getErrorMessage } from "@/lib/errors"
+import { formatEventTime, getLogEventKey } from "@/lib/log-event"
 
-const scenarios = [
+const fallbackScenarios = [
   "normal",
   "error_spike",
   "auth_failures",
@@ -33,9 +36,7 @@ function mergeLogEvents(liveEvents: LogEvent[], persistedEvents: LogEvent[]): Lo
   const seenKeys = new Set<string>()
 
   for (const event of [...liveEvents, ...persistedEvents]) {
-    const key =
-      event.event_id ||
-      [event.timestamp, event.service, event.message, event.network?.source_ip].join("-")
+    const key = getLogEventKey(event)
 
     if (seenKeys.has(key)) {
       continue
@@ -53,8 +54,9 @@ function mergeLogEvents(liveEvents: LogEvent[], persistedEvents: LogEvent[]): Lo
 }
 
 export function LiveLogsPage() {
-  const [scenario, setScenario] = useState<(typeof scenarios)[number]>("mixed")
+  const [scenario, setScenario] = useState("mixed")
   const [searchedLogs, setSearchedLogs] = useState<LogEvent[] | null>(null)
+  const scenariosQuery = useLogScenarios()
   const streamStatus = useStreamStatus()
   const recentLogs = useRecentLogs(40)
   const batchStatus = useBatchStatus()
@@ -67,6 +69,14 @@ export function LiveLogsPage() {
     [liveSocket.events, recentLogs.data?.items]
   )
   const displayedLogs = searchedLogs ?? mergedLogs
+  const scenarios = useMemo(() => {
+    const values = scenariosQuery.data?.scenarios ?? []
+    if (values.length > 0) {
+      return values
+    }
+    return [...fallbackScenarios]
+  }, [scenariosQuery.data?.scenarios])
+  const activeScenario = scenarios.includes(scenario) ? scenario : (scenarios[0] ?? "mixed")
 
   const dbStatusVariant = useMemo(() => {
     if (!streamStatus.data?.database.ok) {
@@ -96,7 +106,7 @@ export function LiveLogsPage() {
             {scenarios.map((value) => (
               <Button
                 key={value}
-                variant={scenario === value ? "default" : "outline"}
+                variant={activeScenario === value ? "default" : "outline"}
                 size="sm"
                 onClick={() => setScenario(value)}
               >
@@ -106,14 +116,14 @@ export function LiveLogsPage() {
           </div>
           <div className="mt-3 flex gap-2">
             <Button
-              onClick={() => generateLogs.mutate({ scenario, count: 50 })}
+              onClick={() => generateLogs.mutate({ scenario: activeScenario, count: 50 })}
               disabled={generateLogs.isPending}
             >
               Generate 50
             </Button>
             <Button
               variant="secondary"
-              onClick={() => generateLogs.mutate({ scenario, count: 250 })}
+              onClick={() => generateLogs.mutate({ scenario: activeScenario, count: 250 })}
               disabled={generateLogs.isPending}
             >
               Generate 250
@@ -126,10 +136,20 @@ export function LiveLogsPage() {
               Consume Kafka
             </Button>
           </div>
+          {scenariosQuery.isError ? (
+            <p className="text-xs text-red-700 dark:text-red-300">
+              Failed to load scenarios: {getErrorMessage(scenariosQuery.error)}
+            </p>
+          ) : null}
           {generateLogs.data ? (
             <p className="text-muted-foreground mt-3 text-xs">
               Generated {generateLogs.data.generated}, persisted {generateLogs.data.persisted},
               Kafka published {generateLogs.data.kafka_published}.
+            </p>
+          ) : null}
+          {generateLogs.isError ? (
+            <p className="text-xs text-red-700 dark:text-red-300">
+              Generation failed: {getErrorMessage(generateLogs.error)}
             </p>
           ) : null}
           {consumeStream.data ? (
@@ -138,16 +158,30 @@ export function LiveLogsPage() {
               skipped {consumeStream.data.skipped}.
             </p>
           ) : null}
+          {consumeStream.isError ? (
+            <p className="text-xs text-red-700 dark:text-red-300">
+              Stream consume failed: {getErrorMessage(consumeStream.error)}
+            </p>
+          ) : null}
           <div className="mt-3">
             <LogSearchForm
               onSearch={async (params) => {
-                const response = await logSearch.mutateAsync(params)
-                setSearchedLogs(response.items)
+                try {
+                  const response = await logSearch.mutateAsync(params)
+                  setSearchedLogs(response.items)
+                } catch {
+                  setSearchedLogs([])
+                }
               }}
               onClear={() => setSearchedLogs(null)}
               isPending={logSearch.isPending}
             />
           </div>
+          {logSearch.isError ? (
+            <p className="text-xs text-red-700 dark:text-red-300">
+              Search failed: {getErrorMessage(logSearch.error)}
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -170,6 +204,12 @@ export function LiveLogsPage() {
             <Badge variant={liveSocket.metricsState === "open" ? "success" : "warning"}>
               WS metrics {liveSocket.metricsState}
             </Badge>
+            {liveSocket.reconnectAttempts > 0 ? (
+              <Badge variant="warning">WS retries {liveSocket.reconnectAttempts}</Badge>
+            ) : null}
+            {liveSocket.metricsReconnectAttempts > 0 ? (
+              <Badge variant="warning">Metrics retries {liveSocket.metricsReconnectAttempts}</Badge>
+            ) : null}
             <Badge variant={batchStatus.data?.status === "ok" ? "success" : "outline"}>
               Batch {batchStatus.data?.engine ?? "idle"}
             </Badge>
@@ -181,6 +221,16 @@ export function LiveLogsPage() {
             </Badge>
             <Badge variant="outline">Live events {liveSocket.events.length}</Badge>
           </div>
+          {streamStatus.isError ? (
+            <p className="text-xs text-red-700 dark:text-red-300">
+              Stream status failed: {getErrorMessage(streamStatus.error)}
+            </p>
+          ) : null}
+          {recentLogs.isError ? (
+            <p className="text-xs text-red-700 dark:text-red-300">
+              Recent logs failed: {getErrorMessage(recentLogs.error)}
+            </p>
+          ) : null}
           {liveSocket.metrics ? (
             <p className="text-muted-foreground mb-3 text-xs">
               Live window {liveSocket.metrics.window_size}: {liveSocket.metrics.total_events} events, {" "}
@@ -214,16 +264,24 @@ export function LiveLogsPage() {
                 </tr>
               </thead>
               <tbody>
-                {displayedLogs.map((event) => (
-                  <tr key={event.event_id} className="border-border border-t">
-                    <td className="px-2 py-1.5">{new Date(event.timestamp).toLocaleTimeString()}</td>
-                    <td className="px-2 py-1.5">{event.service}</td>
-                    <td className="px-2 py-1.5">{event.log_level}</td>
-                    <td className="px-2 py-1.5">{event.http?.status ?? "-"}</td>
-                    <td className="px-2 py-1.5">{event.network?.source_ip ?? "-"}</td>
-                    <td className="px-2 py-1.5">{event.message}</td>
+                {displayedLogs.length === 0 ? (
+                  <tr>
+                    <td className="text-muted-foreground px-2 py-3" colSpan={6}>
+                      {logSearch.isPending ? "Searching logs..." : "No logs available for current filters."}
+                    </td>
                   </tr>
-                ))}
+                ) : (
+                  displayedLogs.map((event, index) => (
+                    <tr key={`${getLogEventKey(event)}-${index}`} className="border-border border-t">
+                      <td className="px-2 py-1.5">{formatEventTime(event.timestamp)}</td>
+                      <td className="px-2 py-1.5">{event.service || "-"}</td>
+                      <td className="px-2 py-1.5">{event.log_level || "-"}</td>
+                      <td className="px-2 py-1.5">{event.http?.status ?? "-"}</td>
+                      <td className="px-2 py-1.5">{event.network?.source_ip ?? "-"}</td>
+                      <td className="px-2 py-1.5">{event.message || "-"}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

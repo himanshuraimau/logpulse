@@ -6,6 +6,8 @@ export function useRecentAnomalies(limit = 120, sinceMinutes = 240) {
   return useQuery({
     queryKey: ["recent-anomalies", limit, sinceMinutes],
     queryFn: () => getAnomalies(limit, sinceMinutes),
-    refetchInterval: 6000,
+    refetchInterval: 12000,
+    refetchIntervalInBackground: false,
+    retry: 1,
   })
 }

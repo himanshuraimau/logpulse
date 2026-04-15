@@ -63,15 +63,16 @@ def _aggregate_with_pyspark(
     if not rows:
         return [], None
 
-    spark = (
-        SparkSession.builder
-        .master("local[*]")
-        .appName("logpulse-batch-scaffold")
-        .getOrCreate()
-    )
-    spark.sparkContext.setLogLevel("ERROR")
-
+    spark = None
     try:
+        spark = (
+            SparkSession.builder
+            .master("local[*]")
+            .appName("logpulse-batch-scaffold")
+            .getOrCreate()
+        )
+        spark.sparkContext.setLogLevel("ERROR")
+
         dataframe = spark.createDataFrame(rows)
         aggregated = (
             dataframe.groupBy("service")
@@ -92,8 +93,11 @@ def _aggregate_with_pyspark(
             for row in aggregated.collect()
         ]
         return records, None
+    except Exception as exc:  # pragma: no cover - runtime environment specific
+        return None, f"pyspark-runtime-failed: {exc}"
     finally:
-        spark.stop()
+        if spark is not None:
+            spark.stop()
 
 
 def run_service_aggregate_job(

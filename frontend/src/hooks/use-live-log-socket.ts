@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import type { LiveMetrics, LogEvent } from "@/api/logs"
 import { config } from "@/lib/config"
+import { getLogEventKey } from "@/lib/log-event"
 
-type SocketState = "idle" | "connecting" | "open" | "closed" | "error"
+type SocketState = "idle" | "connecting" | "reconnecting" | "open" | "closed" | "error"
 
 type LogSocketMessage = {
   type: "log"
@@ -42,8 +43,11 @@ export function useLiveLogSocket() {
   const [events, setEvents] = useState<LogEvent[]>([])
   const [metrics, setMetrics] = useState<LiveMetrics | null>(null)
   const [lastSequence, setLastSequence] = useState(0)
+  const [reconnectAttempts, setReconnectAttempts] = useState(0)
+  const [metricsReconnectAttempts, setMetricsReconnectAttempts] = useState(0)
+  const lastSequenceRef = useRef(0)
 
-  const websocketUrl = useMemo(() => {
+  const websocketBaseUrl = useMemo(() => {
     return `${config.wsBaseUrl}/ws/logs`
   }, [])
 
@@ -52,65 +56,186 @@ export function useLiveLogSocket() {
   }, [])
 
   useEffect(() => {
-    setState("connecting")
-    const socket = new WebSocket(websocketUrl)
+    lastSequenceRef.current = lastSequence
+  }, [lastSequence])
 
-    socket.onopen = () => setState("open")
-    socket.onmessage = (messageEvent) => {
-      const message = parseSocketMessage(messageEvent.data)
-      if (!message) {
+  useEffect(() => {
+    let socket: WebSocket | null = null
+    let reconnectTimer: number | null = null
+    let attempt = 0
+    let disposed = false
+
+    const clearReconnectTimer = () => {
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer)
+        reconnectTimer = null
+      }
+    }
+
+    const scheduleReconnect = () => {
+      if (disposed) {
         return
       }
 
-      if (message.type === "log") {
+      attempt += 1
+      setReconnectAttempts(attempt)
+      const delay = Math.min(1000 * 2 ** (attempt - 1), 10000)
+      setState("reconnecting")
+      reconnectTimer = window.setTimeout(connect, delay)
+    }
+
+    const connect = () => {
+      clearReconnectTimer()
+
+      const nextUrl = `${websocketBaseUrl}?last_sequence=${lastSequenceRef.current}`
+      setState(attempt > 0 ? "reconnecting" : "connecting")
+
+      socket = new WebSocket(nextUrl)
+
+      socket.onopen = () => {
+        if (disposed) {
+          return
+        }
+
+        attempt = 0
+        setReconnectAttempts(0)
+        setState("open")
+      }
+
+      socket.onmessage = (messageEvent) => {
+        const message = parseSocketMessage(messageEvent.data)
+        if (!message || message.type !== "log") {
+          return
+        }
+
         setLastSequence(message.sequence)
         setEvents((currentEvents) => {
+          const incomingKey = getLogEventKey(message.data)
           const deduped = [
             message.data,
-            ...currentEvents.filter((event) => event.event_id !== message.data.event_id),
+            ...currentEvents.filter((event) => getLogEventKey(event) !== incomingKey),
           ]
           return deduped.slice(0, 150)
         })
-        return
       }
 
+      socket.onerror = () => {
+        if (disposed) {
+          return
+        }
+
+        setState("error")
+      }
+
+      socket.onclose = () => {
+        if (disposed) {
+          return
+        }
+
+        setState("closed")
+        scheduleReconnect()
+      }
     }
-    socket.onerror = () => setState("error")
-    socket.onclose = () => setState("closed")
+
+    connect()
 
     return () => {
-      socket.close()
+      disposed = true
+      clearReconnectTimer()
+      if (socket) {
+        socket.close()
+      }
     }
-  }, [websocketUrl])
+  }, [websocketBaseUrl])
 
   useEffect(() => {
-    setMetricsState("connecting")
-    const socket = new WebSocket(metricsWebsocketUrl)
+    let socket: WebSocket | null = null
+    let reconnectTimer: number | null = null
+    let attempt = 0
+    let disposed = false
 
-    socket.onopen = () => setMetricsState("open")
-    socket.onmessage = (messageEvent) => {
-      const message = parseSocketMessage(messageEvent.data)
-      if (!message || message.type !== "metrics") {
+    const clearReconnectTimer = () => {
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer)
+        reconnectTimer = null
+      }
+    }
+
+    const scheduleReconnect = () => {
+      if (disposed) {
         return
       }
 
-      setMetrics(message.data)
+      attempt += 1
+      setMetricsReconnectAttempts(attempt)
+      const delay = Math.min(1000 * 2 ** (attempt - 1), 10000)
+      setMetricsState("reconnecting")
+      reconnectTimer = window.setTimeout(connect, delay)
     }
-    socket.onerror = () => setMetricsState("error")
-    socket.onclose = () => setMetricsState("closed")
+
+    const connect = () => {
+      clearReconnectTimer()
+      setMetricsState(attempt > 0 ? "reconnecting" : "connecting")
+
+      socket = new WebSocket(metricsWebsocketUrl)
+
+      socket.onopen = () => {
+        if (disposed) {
+          return
+        }
+
+        attempt = 0
+        setMetricsReconnectAttempts(0)
+        setMetricsState("open")
+      }
+
+      socket.onmessage = (messageEvent) => {
+        const message = parseSocketMessage(messageEvent.data)
+        if (!message || message.type !== "metrics") {
+          return
+        }
+
+        setMetrics(message.data)
+      }
+
+      socket.onerror = () => {
+        if (disposed) {
+          return
+        }
+
+        setMetricsState("error")
+      }
+
+      socket.onclose = () => {
+        if (disposed) {
+          return
+        }
+
+        setMetricsState("closed")
+        scheduleReconnect()
+      }
+    }
+
+    connect()
 
     return () => {
-      socket.close()
+      disposed = true
+      clearReconnectTimer()
+      if (socket) {
+        socket.close()
+      }
     }
   }, [metricsWebsocketUrl])
 
   return {
     state,
     metricsState,
-    websocketUrl,
+    websocketUrl: websocketBaseUrl,
     metricsWebsocketUrl,
     events,
     metrics,
     lastSequence,
+    reconnectAttempts,
+    metricsReconnectAttempts,
   }
 }

@@ -6,6 +6,8 @@ export function useBatchStatus() {
   return useQuery({
     queryKey: ["batch-status"],
     queryFn: getBatchStatus,
-    refetchInterval: 7000,
+    refetchInterval: 12000,
+    refetchIntervalInBackground: false,
+    retry: 1,
   })
 }

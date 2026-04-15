@@ -12,6 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { getErrorMessage } from "@/lib/errors"
 
 export function BatchAnalyticsPage() {
   const batchStatus = useBatchStatus()
@@ -64,9 +65,27 @@ export function BatchAnalyticsPage() {
             <p className="text-muted-foreground mb-3 text-xs">Warning: {batchStatus.data.warning}</p>
           ) : null}
 
+          {batchStatus.isError ? (
+            <p className="text-xs text-red-700 dark:text-red-300">
+              Failed to load batch status: {getErrorMessage(batchStatus.error)}
+            </p>
+          ) : null}
+
+          {batchHistory.isError ? (
+            <p className="text-xs text-red-700 dark:text-red-300">
+              Failed to load batch history: {getErrorMessage(batchHistory.error)}
+            </p>
+          ) : null}
+
           <Button onClick={() => runBatch.mutate()} disabled={runBatch.isPending}>
             {runBatch.isPending ? "Running..." : "Run Batch Once"}
           </Button>
+
+          {runBatch.isError ? (
+            <p className="text-xs text-red-700 dark:text-red-300">
+              Batch run failed: {getErrorMessage(runBatch.error)}
+            </p>
+          ) : null}
 
           <div className="mt-3 border border-border bg-background/70">
             <p className="border-b border-border px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">

@@ -168,4 +168,7 @@ def batch_status() -> dict[str, Any]:
 
 @router.post("/batch/run")
 def run_batch() -> dict[str, Any]:
-    return run_batch_once()
+    try:
+        return run_batch_once()
+    except Exception as exc:  # pragma: no cover - defensive API surface
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

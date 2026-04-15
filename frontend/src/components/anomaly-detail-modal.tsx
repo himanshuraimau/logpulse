@@ -1,6 +1,10 @@
+import { useEffect, useRef } from "react"
+
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useAnomalyDetail } from "@/hooks/use-anomaly-detail"
+import { getErrorMessage } from "@/lib/errors"
+import { formatEventDateTime, formatEventTime, getLogEventKey } from "@/lib/log-event"
 
 type AnomalyDetailModalProps = {
   eventId: string | null
@@ -9,6 +13,28 @@ type AnomalyDetailModalProps = {
 
 export function AnomalyDetailModal({ eventId, onClose }: AnomalyDetailModalProps) {
   const detailQuery = useAnomalyDetail(eventId, 25, Boolean(eventId))
+  const panelRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!eventId) {
+      return undefined
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose()
+      }
+    }
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    window.addEventListener("keydown", onKeyDown)
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener("keydown", onKeyDown)
+    }
+  }, [eventId, onClose])
 
   if (!eventId) {
     return null
@@ -18,8 +44,26 @@ export function AnomalyDetailModal({ eventId, onClose }: AnomalyDetailModalProps
   const context = detailQuery.data?.context ?? []
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="max-h-[80vh] w-full max-w-4xl overflow-auto border border-border bg-background p-4 shadow-lg">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      role="presentation"
+      onClick={(mouseEvent) => {
+        if (!panelRef.current) {
+          return
+        }
+
+        if (!panelRef.current.contains(mouseEvent.target as Node)) {
+          onClose()
+        }
+      }}
+    >
+      <div
+        ref={panelRef}
+        className="max-h-[80vh] w-full max-w-4xl overflow-auto border border-border bg-background p-4 shadow-lg"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Anomaly detail"
+      >
         <div className="mb-3 flex items-center justify-between gap-2">
           <div>
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Anomaly Detail</p>
@@ -33,7 +77,14 @@ export function AnomalyDetailModal({ eventId, onClose }: AnomalyDetailModalProps
         {detailQuery.isLoading ? (
           <p className="text-xs text-muted-foreground">Loading anomaly context...</p>
         ) : detailQuery.isError ? (
-          <p className="text-xs text-red-600">Failed to load anomaly detail.</p>
+          <div className="space-y-2">
+            <p className="text-xs text-red-700 dark:text-red-300">
+              Failed to load anomaly detail: {getErrorMessage(detailQuery.error)}
+            </p>
+            <Button size="sm" variant="outline" onClick={() => detailQuery.refetch()}>
+              Retry
+            </Button>
+          </div>
         ) : event ? (
           <div className="space-y-3">
             <div className="flex flex-wrap gap-2">
@@ -45,7 +96,7 @@ export function AnomalyDetailModal({ eventId, onClose }: AnomalyDetailModalProps
             </div>
             <div className="border border-border p-2 text-xs">
               <p><strong>Event ID:</strong> {event.event_id}</p>
-              <p><strong>Time:</strong> {new Date(event.timestamp).toLocaleString()}</p>
+              <p><strong>Time:</strong> {formatEventDateTime(event.timestamp)}</p>
               <p><strong>Service:</strong> {event.service}</p>
               <p><strong>Status:</strong> {event.http?.status ?? "-"}</p>
               <p><strong>Source IP:</strong> {event.network?.source_ip ?? "-"}</p>
@@ -75,9 +126,9 @@ export function AnomalyDetailModal({ eventId, onClose }: AnomalyDetailModalProps
                         </td>
                       </tr>
                     ) : (
-                      context.map((item) => (
-                        <tr key={item.event_id} className="border-t border-border">
-                          <td className="px-2 py-1.5">{new Date(item.timestamp).toLocaleTimeString()}</td>
+                      context.map((item, index) => (
+                        <tr key={`${getLogEventKey(item)}-${index}`} className="border-t border-border">
+                          <td className="px-2 py-1.5">{formatEventTime(item.timestamp)}</td>
                           <td className="px-2 py-1.5">{item.log_level}</td>
                           <td className="px-2 py-1.5">{item.http?.status ?? "-"}</td>
                           <td className="px-2 py-1.5">{item.message}</td>

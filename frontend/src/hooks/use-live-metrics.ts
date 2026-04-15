@@ -6,6 +6,8 @@ export function useLiveMetrics(windowSize = 200) {
   return useQuery({
     queryKey: ["live-metrics", windowSize],
     queryFn: () => getLiveMetrics(windowSize),
-    refetchInterval: 4000,
+    refetchInterval: 10000,
+    refetchIntervalInBackground: false,
+    retry: 1,
   })
 }

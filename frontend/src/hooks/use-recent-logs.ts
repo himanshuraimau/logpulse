@@ -6,6 +6,8 @@ export function useRecentLogs(limit = 50) {
   return useQuery({
     queryKey: ["recent-logs", limit],
     queryFn: () => getRecentLogs(limit),
-    refetchInterval: 3000,
+    refetchInterval: 10000,
+    refetchIntervalInBackground: false,
+    retry: 1,
   })
 }

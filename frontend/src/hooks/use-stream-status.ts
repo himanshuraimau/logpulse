@@ -6,6 +6,8 @@ export function useStreamStatus() {
   return useQuery({
     queryKey: ["stream-status"],
     queryFn: getStreamStatus,
-    refetchInterval: 5000,
+    refetchInterval: 8000,
+    refetchIntervalInBackground: false,
+    retry: 1,
   })
 }

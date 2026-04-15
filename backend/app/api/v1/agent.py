@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.agent.llm import get_agent_env_diagnostics
 from app.agent.worker import (
     create_report_request,
     get_report_by_id,
@@ -20,6 +21,11 @@ router = APIRouter()
 class AnalyzeRequest(BaseModel):
     event_id: str = Field(min_length=1, max_length=128)
     context_limit: int = Field(default=settings.agent_default_context_limit, ge=5, le=200)
+
+
+@router.get("/agent/config")
+def get_agent_config() -> dict[str, Any]:
+    return get_agent_env_diagnostics()
 
 
 @router.post("/agent/analyze")

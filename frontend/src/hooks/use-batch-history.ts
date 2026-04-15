@@ -6,6 +6,8 @@ export function useBatchHistory(limit = 20) {
   return useQuery({
     queryKey: ["batch-history", limit],
     queryFn: () => getBatchMetrics(limit),
-    refetchInterval: 9000,
+    refetchInterval: 15000,
+    refetchIntervalInBackground: false,
+    retry: 1,
   })
 }

@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { getErrorMessage } from "@/lib/errors"
 
 export function MetricsPage() {
   const metricsQuery = useLiveMetrics(300)
@@ -52,6 +53,11 @@ export function MetricsPage() {
               Last sequence: <strong>{metricsQuery.data?.last_sequence ?? 0}</strong>
             </p>
           </div>
+          {metricsQuery.isError ? (
+            <p className="text-xs text-red-700 dark:text-red-300">
+              Failed to load live metrics: {getErrorMessage(metricsQuery.error)}
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -63,7 +69,7 @@ export function MetricsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="border-border bg-background/70 max-h-[440px] overflow-auto border">
+          <div className="border-border bg-background/70 max-h-110 overflow-auto border">
             <table className="w-full text-left text-xs">
               <thead className="bg-muted sticky top-0 text-[10px] uppercase">
                 <tr>

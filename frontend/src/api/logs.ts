@@ -102,8 +102,12 @@ export type AnomalyDetailResponse = {
 }
 
 export type GenerateLogsPayload = {
-  scenario: "normal" | "error_spike" | "auth_failures" | "request_burst" | "mixed"
+  scenario: string
   count: number
+}
+
+export type ScenarioListResponse = {
+  scenarios: string[]
 }
 
 export type GenerateLogsResponse = {
@@ -158,8 +162,55 @@ export type BatchMetricsResponse = {
   items: BatchStatusResponse[]
 }
 
+export type RcaReport = {
+  report_id: string
+  event_id: string
+  status: string
+  context_limit: number
+  provider?: string | null
+  model?: string | null
+  fallback_used: boolean
+  summary?: string | null
+  root_cause?: string | null
+  impact?: string | null
+  confidence?: number | null
+  recommendations: string[]
+  evidence: string[]
+  timeline: string[]
+  tool_trace: string[]
+  error_message?: string | null
+  started_at?: string | null
+  completed_at?: string | null
+  created_at?: string | null
+}
+
+export type AnalyzeAnomalyPayload = {
+  event_id: string
+  context_limit?: number
+}
+
+export type AnalyzeAnomalyResponse = {
+  status: "queued"
+  report: RcaReport
+}
+
+export type AgentReportsResponse = {
+  count: number
+  items: RcaReport[]
+}
+
+export type AgentReportsParams = {
+  limit?: number
+  status?: string
+  eventId?: string
+}
+
 export function getHealth() {
   return apiRequest<HealthResponse>("/health")
+}
+
+export function getLogScenarios() {
+  return apiRequest<ScenarioListResponse>("/logs/scenarios")
 }
 
 export function getStreamStatus() {
@@ -242,4 +293,31 @@ export function runBatchJob() {
   return apiRequest<BatchStatusResponse>("/batch/run", {
     method: "POST",
   })
+}
+
+export function analyzeAnomaly(payload: AnalyzeAnomalyPayload) {
+  return apiRequest<AnalyzeAnomalyResponse>("/agent/analyze", {
+    method: "POST",
+    body: payload,
+  })
+}
+
+export function getAgentReports(params: AgentReportsParams = {}) {
+  const searchParams = new URLSearchParams()
+
+  searchParams.set("limit", String(params.limit ?? 20))
+
+  if (params.status) {
+    searchParams.set("status", params.status)
+  }
+
+  if (params.eventId) {
+    searchParams.set("event_id", params.eventId)
+  }
+
+  return apiRequest<AgentReportsResponse>(`/agent/reports?${searchParams.toString()}`)
+}
+
+export function getAgentReportById(reportId: string) {
+  return apiRequest<RcaReport>(`/agent/reports/${encodeURIComponent(reportId)}`)
 }
